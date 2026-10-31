@@ -45,7 +45,15 @@ $start.UseShellExecute = $false
 
 ## 安装与卸载
 
-关闭已有的屏保预览，在 `dist` 目录运行：
+普通用户可在 [Releases](https://github.com/Foxing365/FoxVideoSCR/releases) 下载 `FoxVideoSCR-v0.1.0-windows-x86.zip`，**先解压整个 ZIP**，双击其中的 `Install.cmd`，并确认 Windows 管理员权限提示。不要在压缩包内直接运行，也不需要下载 Source code。
+
+安装后，在自动打开的“屏幕保护程序设置”中确认选中 **FoxVideoSCR**，点击“设置”添加视频、保存，再点“预览”。等待时间和恢复时登录选项由 Windows 管理。
+
+如果不自动打开设置，可在 Windows“设置 → 个性化 → 锁屏界面 → 屏幕保护程序”中进入。HEVC 等格式无法播放时，安装下文所述的 x86 解码组件；本程序不附带解码器。
+
+卸载时关闭屏保及预览，双击同一目录的 `Uninstall.cmd`，它会尝试恢复安装前的屏保，个人配置仍会保留。
+
+也可以通过 PowerShell 手动安装。关闭已有的屏保预览，在解压目录（或开发者的 `dist` 目录）运行：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1
