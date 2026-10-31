@@ -1,0 +1,30 @@
+name: Windows build
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        shell: powershell
+        run: ./build.ps1
+      - name: Run playlist and configuration checks
+        shell: powershell
+        run: |
+          $si = New-Object Diagnostics.ProcessStartInfo
+          $si.FileName = (Resolve-Path ./dist/FoxVideoSCR.scr).Path
+          $si.Arguments = '/selftest'
+          $si.UseShellExecute = $false
+          $p = [Diagnostics.Process]::Start($si)
+          if (!$p.WaitForExit(15000)) { $p.Kill(); throw 'Self-test timed out' }
+          $result = Join-Path $env:LOCALAPPDATA 'FoxVideoSCR/selftest-result.txt'
+          if ($p.ExitCode -ne 0 -or !(Test-Path $result) -or (Get-Content $result) -ne 'PASS: 6 checks') { throw 'Self-test failed' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FoxVideoSCR-windows-x86
+          path: dist/
