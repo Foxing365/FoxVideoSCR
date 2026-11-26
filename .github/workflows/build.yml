@@ -4,7 +4,7 @@ on:
   pull_request:
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   build:
     runs-on: windows-latest
@@ -23,8 +23,25 @@ jobs:
           $p = [Diagnostics.Process]::Start($si)
           if (!$p.WaitForExit(15000)) { $p.Kill(); throw 'Self-test timed out' }
           $result = Join-Path $env:LOCALAPPDATA 'FoxVideoSCR/selftest-result.txt'
-          if ($p.ExitCode -ne 0 -or !(Test-Path $result) -or (Get-Content $result) -ne 'PASS: 6 checks') { throw 'Self-test failed' }
+          if ($p.ExitCode -ne 0 -or !(Test-Path $result) -or (Get-Content $result) -ne 'PASS: 8 checks') { throw 'Self-test failed' }
+      - name: Package release archive
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: powershell
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $zip = "./dist/FoxVideoSCR-$tag-windows-x64.zip"
+          Compress-Archive -Path './dist/FoxVideoSCR.scr','./dist/Install.cmd','./dist/Install.ps1','./dist/Uninstall.cmd','./dist/Uninstall.ps1','./dist/README.md','./dist/LICENSE' -DestinationPath $zip -CompressionLevel Optimal -Force
+          $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  FoxVideoSCR-$tag-windows-x64.zip" | Set-Content -LiteralPath './dist/SHA256SUMS.txt' -Encoding ASCII
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: powershell
+        run: |
+          $tag = "${{ github.ref_name }}"
+          gh release create $tag "./dist/FoxVideoSCR-$tag-windows-x64.zip" "./dist/SHA256SUMS.txt" --title "FoxVideoSCR $tag" --notes-file RELEASE_NOTES.md
       - uses: actions/upload-artifact@v4
         with:
-          name: FoxVideoSCR-windows-x86
+          name: FoxVideoSCR-windows-x64
           path: dist/

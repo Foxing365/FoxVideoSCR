@@ -17,9 +17,9 @@
 
 ## 环境与解码
 
-Windows 10/11，.NET Framework 4.8（通常已随系统安装）。程序编译为 x86，使用 WPF `MediaElement` 与 Windows 的媒体播放基础设施。
+Windows 10/11（64 位），.NET Framework 4.8（通常已随系统安装）。程序编译为 **x64（64 位）**，并启用 Per-Monitor DPI v2，适配多显示器不同缩放比例下的无缝全屏播放。
 
-视频格式能否播放，取决于系统安装的 **32 位**分离器和解码器。HEVC、MKV 等格式可能需要 [LAV Filters 官方发行版](https://github.com/Nevcairiel/LAVFilters/releases) 的 x86 Splitter / Video / Audio。此项目不附带、不自动下载解码器。
+视频格式能否播放，取决于系统安装的 **64 位**分离器和解码器（例如 Windows 自带的 HEVC 视频扩展，或 [LAV Filters 官方发行版](https://github.com/Nevcairiel/LAVFilters/releases) 的 x64 Splitter / Video / Audio）。此项目不附带、不自动下载解码器。
 
 合成输出在开发机的 HEVC 视频测试中消除了旧屏保的横向撕裂；不同显卡、显示器和远程桌面环境仍需实测。多屏独立播放，首版不保证逐帧同步。倍速也受底层媒体组件支持程度影响。
 
@@ -45,11 +45,11 @@ $start.UseShellExecute = $false
 
 ## 安装与卸载
 
-普通用户可在 [Releases](https://github.com/Foxing365/FoxVideoSCR/releases) 下载 `FoxVideoSCR-v0.1.0-windows-x86.zip`，**先解压整个 ZIP**，双击其中的 `Install.cmd`，并确认 Windows 管理员权限提示。不要在压缩包内直接运行，也不需要下载 Source code。
+普通用户可在 [Releases](https://github.com/Foxing365/FoxVideoSCR/releases) 下载 `FoxVideoSCR-v0.2.0-windows-x64.zip`，**先解压整个 ZIP**，双击其中的 `Install.cmd`，并确认 Windows 管理员权限提示。不要在压缩包内直接运行，也不需要下载 Source code。
 
-安装后，在自动打开的“屏幕保护程序设置”中确认选中 **FoxVideoSCR**，点击“设置”添加视频、保存，再点“预览”。等待时间和恢复时登录选项由 Windows 管理。
+安装后，在自动打开的“屏幕保护程序设置”中确认选中 **FoxVideoSCR**，点击“设置”添加视频、调整播放偏好和显示器设置、保存，再点“预览”。等待时间和恢复时登录选项由 Windows 管理。
 
-如果不自动打开设置，可在 Windows“设置 → 个性化 → 锁屏界面 → 屏幕保护程序”中进入。HEVC 等格式无法播放时，安装下文所述的 x86 解码组件；本程序不附带解码器。
+如果不自动打开设置，可在 Windows“设置 → 个性化 → 锁屏界面 → 屏幕保护程序”中进入。HEVC 等格式无法播放时，安装下文所述的 64 位解码组件；本程序不附带解码器。
 
 卸载时关闭屏保及预览，双击同一目录的 `Uninstall.cmd`，它会尝试恢复安装前的屏保，个人配置仍会保留。
 
