@@ -119,7 +119,7 @@ namespace FoxVideoSCR {
     Padding = new Thickness(7, 2, 7, 2),
     Margin = new Thickness(10, 0, 0, 0),
     VerticalAlignment = VerticalAlignment.Center,
-    Child = new TextBlock { Text = "v0.2.1 · 64位", Foreground = AccentSoftText, FontSize = 11, FontWeight = FontWeights.SemiBold }
+    Child = new TextBlock { Text = "v0.2.2 · 64位", Foreground = AccentSoftText, FontSize = 11, FontWeight = FontWeights.SemiBold }
    };
    titleLine.Children.Add(versionPill);
    titleStack.Children.Add(titleLine);

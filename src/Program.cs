@@ -5,7 +5,7 @@ using System.Windows;
 [assembly: AssemblyTitle("FoxVideoSCR")]
 [assembly: AssemblyProduct("FoxVideoSCR")]
 [assembly: AssemblyDescription("FoxVideoSCR · 视频屏幕保护程序")]
-[assembly: AssemblyVersion("0.2.1.0")]
+[assembly: AssemblyVersion("0.2.2.0")]
 namespace FoxVideoSCR {
  internal static class Program {
   [STAThread] private static void Main(string[] args) {

@@ -145,6 +145,22 @@ namespace FoxVideoSCR {
    }
    mode = "Video";
   }
+
+  internal void ResolvePrimaryPreview(IEnumerable<DisplayInfo> displays, out string mode, out string fit, out List<string> videos) {
+   DisplayInfo primary = null;
+   if (displays != null) {
+    foreach (var d in displays) {
+     if (d == null) continue;
+     if (primary == null) primary = d;
+     if (d.IsPrimary) {
+      primary = d;
+      break;
+     }
+    }
+   }
+   if (primary == null) primary = new DisplayInfo { DeviceName = "", IsPrimary = true };
+   ResolveMonitor(primary, out mode, out fit, out videos);
+  }
  }
 
  internal static class Log {

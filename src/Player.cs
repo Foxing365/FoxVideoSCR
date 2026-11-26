@@ -36,13 +36,243 @@ namespace FoxVideoSCR {
   }
  }
 
- internal sealed class VideoSurface : Border {
+ internal interface IMediaSlotHost {
+  void LoadAndPlay(int slot, string path, int generation, bool activeNow);
+  void RewindAndPlay(int slot);
+  void PauseAtStart(int slot);
+  void PromoteVisual(int activeSlot, int standbySlot);
+  void MuteSlot(int slot);
+  void ResetSlot(int slot);
+  void StartOpeningTimeout(int generation);
+  void StopOpeningTimeout();
+  void SchedulePreload();
+  void StopPreloadTimer();
+  void ShowLoading();
+  void HideStatus();
+  void ShowNoVideo();
+ }
+
+ internal sealed class DualSlotPlaybackController {
+  private sealed class SlotState {
+   internal readonly int Index;
+   internal string Path;
+   internal int Generation;
+   internal bool Loading;
+   internal bool Ready;
+   internal bool HasMedia;
+
+   internal SlotState(int index) { Index = index; }
+  }
+
+  private readonly Playlist playlist;
+  private readonly IMediaSlotHost host;
+  private readonly SlotState[] slots;
+  private int activeIndex;
+  private bool closed;
+  private bool transitioning;
+
+  internal int ActiveIndex { get { return activeIndex; } }
+
+  internal DualSlotPlaybackController(Playlist list, IMediaSlotHost slotHost) {
+   playlist = list;
+   host = slotHost;
+   slots = new[] { new SlotState(0), new SlotState(1) };
+   activeIndex = 0;
+  }
+
+  internal void Start() {
+   if (closed) return;
+   string first = playlist.Next(false);
+   if (first == null) {
+    host.ShowNoVideo();
+    return;
+   }
+   LoadIntoActive(first);
+  }
+
+  internal void Close() {
+   closed = true;
+   host.StopOpeningTimeout();
+   host.StopPreloadTimer();
+   for (int i = 0; i < slots.Length; i++) {
+    slots[i].Generation++;
+    slots[i].Loading = false;
+    slots[i].Ready = false;
+    slots[i].HasMedia = false;
+    slots[i].Path = null;
+   }
+  }
+
+  internal void PreloadStandby() {
+   if (closed) return;
+   var active = slots[activeIndex];
+   var standby = slots[1 - activeIndex];
+   if (!active.Ready || standby.Ready || standby.Loading) return;
+
+   string next = playlist.Next(false);
+   if (next == null) return;
+
+   if (standby.HasMedia && string.Equals(next, standby.Path, StringComparison.OrdinalIgnoreCase)) {
+    standby.Ready = true;
+    standby.Loading = false;
+    host.PauseAtStart(standby.Index);
+    return;
+   }
+
+   standby.Generation++;
+   standby.Path = next;
+   standby.Loading = true;
+   standby.Ready = false;
+   standby.HasMedia = false;
+   host.ResetSlot(standby.Index);
+   host.LoadAndPlay(standby.Index, next, standby.Generation, false);
+  }
+
+  internal void OnSlotOpened(int slotIndex, int generation) {
+   if (closed) return;
+   var slot = slots[slotIndex];
+   if (generation != slot.Generation) return;
+
+   slot.Loading = false;
+   slot.HasMedia = true;
+   slot.Ready = true;
+
+   if (slotIndex == activeIndex) {
+    var standby = slots[1 - activeIndex];
+    host.StopOpeningTimeout();
+    host.HideStatus();
+    host.PromoteVisual(activeIndex, standby.Index);
+    if (standby.HasMedia && !standby.Loading) {
+     host.PauseAtStart(standby.Index);
+    }
+    PreloadStandby();
+   } else {
+    host.PauseAtStart(slotIndex);
+   }
+  }
+
+  internal void OnSlotEnded(int slotIndex, int generation) {
+   if (closed || transitioning || slotIndex != activeIndex) return;
+   var active = slots[activeIndex];
+   if (generation != active.Generation) return;
+
+   transitioning = true;
+   try {
+    var standby = slots[1 - activeIndex];
+
+    if (standby.Ready) {
+     host.StopOpeningTimeout();
+     host.StopPreloadTimer();
+
+     activeIndex = standby.Index;
+     active.Ready = false;
+     active.Loading = false;
+
+     host.PromoteVisual(standby.Index, active.Index);
+     if (active.HasMedia) host.PauseAtStart(active.Index);
+     host.HideStatus();
+     host.SchedulePreload();
+     return;
+    }
+
+    if (standby.Loading) {
+     // Promote the in-flight preload slot instead of consuming/opening the same item twice.
+     host.StopOpeningTimeout();
+     host.StopPreloadTimer();
+
+     activeIndex = standby.Index;
+     active.Ready = false;
+     active.Loading = false;
+     host.MuteSlot(active.Index);
+     host.StartOpeningTimeout(standby.Generation);
+     return;
+    }
+
+    host.StopPreloadTimer();
+    string next = playlist.Next(false);
+    if (next == null) {
+     host.ShowNoVideo();
+     return;
+    }
+    if (active.HasMedia && string.Equals(next, active.Path, StringComparison.OrdinalIgnoreCase)) {
+     host.RewindAndPlay(active.Index);
+     PreloadStandby();
+     return;
+    }
+    LoadIntoActive(next);
+   } finally {
+    transitioning = false;
+   }
+  }
+
+  internal void OnOpeningTimeout(int generation) {
+   if (closed) return;
+   var active = slots[activeIndex];
+   if (!active.Loading || active.Generation != generation) return;
+   OnSlotFailed(activeIndex, generation, "打开视频超时");
+  }
+
+  internal void OnSlotFailed(int slotIndex, int generation, string reason) {
+   if (closed) return;
+   var slot = slots[slotIndex];
+   if (generation != slot.Generation) return;
+
+   string failedPath = slot.Path;
+   Log.Write("Playback failed: " + failedPath + "; " + reason);
+   playlist.MarkFailed(failedPath);
+
+   slot.Generation++;
+   slot.Path = null;
+   slot.Loading = false;
+   slot.Ready = false;
+   slot.HasMedia = false;
+   host.ResetSlot(slotIndex);
+
+   if (slotIndex == activeIndex) {
+    host.StopOpeningTimeout();
+    var standby = slots[1 - activeIndex];
+    if (standby.Ready) {
+     activeIndex = standby.Index;
+     host.HideStatus();
+     host.PromoteVisual(standby.Index, slotIndex);
+     host.SchedulePreload();
+     return;
+    }
+    if (standby.Loading) {
+     activeIndex = standby.Index;
+     host.ShowLoading();
+     host.StartOpeningTimeout(standby.Generation);
+     return;
+    }
+    string next = playlist.Next(false);
+    if (next == null) host.ShowNoVideo(); else LoadIntoActive(next);
+   } else {
+    PreloadStandby();
+   }
+  }
+
+  private void LoadIntoActive(string path) {
+   host.StopOpeningTimeout();
+   host.StopPreloadTimer();
+   var active = slots[activeIndex];
+   active.Generation++;
+   active.Path = path;
+   active.Loading = true;
+   active.Ready = false;
+   active.HasMedia = false;
+   host.ResetSlot(activeIndex);
+   host.ShowLoading();
+   host.StartOpeningTimeout(active.Generation);
+   host.LoadAndPlay(activeIndex, path, active.Generation, true);
+  }
+ }
+
+ internal sealed class VideoSurface : Border, IMediaSlotHost {
   private sealed class MediaSlot {
    internal readonly Border Host;
    internal readonly MediaElement Media;
    internal string Path;
-   internal bool Ready;
-   internal bool Loading;
+   internal int Generation;
 
    internal MediaSlot(Stretch stretch) {
     Media = new MediaElement {
@@ -67,21 +297,17 @@ namespace FoxVideoSCR {
    }
   }
 
-  private readonly MediaSlot slotA;
-  private readonly MediaSlot slotB;
-  private MediaSlot active;
-  private MediaSlot standby;
+  private readonly MediaSlot[] slots;
   private readonly TextBlock status;
-  private readonly Playlist playlist;
+  private readonly DualSlotPlaybackController controller;
   private readonly DispatcherTimer openingTimeout;
-  private readonly DispatcherTimer loopMonitor;
   private readonly DispatcherTimer preloadDelay;
   private readonly Settings settings;
   private readonly string fitMode;
   private readonly double targetVolume;
+  private int openingTimeoutGeneration;
   private bool closed;
   private bool started;
-  private bool swapping;
 
   internal VideoSurface(Settings value, IEnumerable<string> videoList, string fit, bool silent) {
    settings = value;
@@ -93,15 +319,10 @@ namespace FoxVideoSCR {
    Margin = new Thickness(0);
    ClipToBounds = true;
 
-   playlist = new Playlist(videoList, settings.Order);
    Stretch stretch = fitMode == "Crop" ? Stretch.UniformToFill : fitMode == "Stretch" ? Stretch.Fill : Stretch.Uniform;
-
-   slotA = new MediaSlot(stretch);
-   slotB = new MediaSlot(stretch);
-   active = slotA;
-   standby = slotB;
-   Panel.SetZIndex(active.Host, 2);
-   Panel.SetZIndex(standby.Host, 1);
+   slots = new[] { new MediaSlot(stretch), new MediaSlot(stretch) };
+   Panel.SetZIndex(slots[0].Host, 2);
+   Panel.SetZIndex(slots[1].Host, 1);
 
    status = new TextBlock {
     Text = "正在加载视频…",
@@ -118,234 +339,156 @@ namespace FoxVideoSCR {
    Panel.SetZIndex(status, 3);
 
    var grid = new Grid { Background = Brushes.Black, ClipToBounds = true };
-   grid.Children.Add(slotA.Host);
-   grid.Children.Add(slotB.Host);
+   grid.Children.Add(slots[0].Host);
+   grid.Children.Add(slots[1].Host);
    grid.Children.Add(status);
    Child = grid;
+
+   controller = new DualSlotPlaybackController(new Playlist(videoList, settings.Order), this);
 
    openingTimeout = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
    openingTimeout.Tick += delegate {
     openingTimeout.Stop();
-    HandleSlotFailure(active, "打开视频超时");
+    if (!closed) controller.OnOpeningTimeout(openingTimeoutGeneration);
    };
-
-   loopMonitor = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-   loopMonitor.Tick += OnLoopMonitorTick;
 
    preloadDelay = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
    preloadDelay.Tick += delegate {
     preloadDelay.Stop();
-    if (!closed) PreloadStandby();
+    if (!closed) controller.PreloadStandby();
    };
 
-   WireSlot(slotA);
-   WireSlot(slotB);
+   WireSlot(0);
+   WireSlot(1);
 
    Loaded += delegate {
     if (!closed && !started) {
      started = true;
-     StartInitial();
+     controller.Start();
     }
    };
   }
 
-  private void WireSlot(MediaSlot slot) {
+  private void WireSlot(int index) {
+   var slot = slots[index];
    slot.Media.MediaOpened += delegate {
     if (closed) return;
-    slot.Loading = false;
-    if (slot == active) {
-     openingTimeout.Stop();
-     status.Visibility = Visibility.Collapsed;
-     slot.Ready = true;
-     slot.Media.SpeedRatio = settings.Speed;
-     slot.Media.Volume = targetVolume;
+    if (index == controller.ActiveIndex) {
      Log.Write("Opened " + slot.Media.NaturalVideoWidth + "x" + slot.Media.NaturalVideoHeight + " (" + fitMode + "): " + slot.Path);
-     loopMonitor.Start();
-     PreloadStandby();
-    } else {
-     slot.Media.Volume = 0;
-     slot.Media.Pause();
-     slot.Media.Position = TimeSpan.Zero;
-     slot.Ready = true;
     }
+    controller.OnSlotOpened(index, slot.Generation);
    };
 
    slot.Media.MediaEnded += delegate {
-    if (closed || slot != active) return;
-    AdvanceActive();
+    if (!closed) controller.OnSlotEnded(index, slot.Generation);
    };
 
    slot.Media.MediaFailed += delegate(object s, ExceptionRoutedEventArgs e) {
     if (closed) return;
-    HandleSlotFailure(slot, e.ErrorException == null ? "无法解码视频" : e.ErrorException.Message);
+    string reason = e.ErrorException == null ? "无法解码视频" : e.ErrorException.Message;
+    controller.OnSlotFailed(index, slot.Generation, reason);
    };
   }
 
-  private void OnLoopMonitorTick(object sender, EventArgs e) {
-   if (closed || swapping || !standby.Ready) return;
-   if (!active.Media.NaturalDuration.HasTimeSpan) return;
-   TimeSpan duration = active.Media.NaturalDuration.TimeSpan;
-   if (duration.TotalSeconds < 1.2) return;
-   TimeSpan remaining = duration - active.Media.Position;
-   double leadMs = Math.Max(60.0, 90.0 * settings.Speed);
-   if (remaining <= TimeSpan.FromMilliseconds(leadMs)) {
-    loopMonitor.Interval = TimeSpan.FromMilliseconds(500);
-    AdvanceActive();
-    return;
-   }
-   TimeSpan desiredInterval = remaining.TotalSeconds <= 1.5
-    ? TimeSpan.FromMilliseconds(25)
-    : TimeSpan.FromMilliseconds(500);
-   if (loopMonitor.Interval != desiredInterval) loopMonitor.Interval = desiredInterval;
-  }
-
-  private void StartInitial() {
-   string next = playlist.Next(false);
-   if (next == null) {
-    ShowNoVideo();
-    return;
-   }
-   LoadIntoActive(next);
-  }
-
-  private void LoadIntoActive(string path) {
-   openingTimeout.Stop();
-   loopMonitor.Stop();
-   active.Media.Stop();
-   active.Media.Close();
-   active.Path = path;
-   active.Ready = false;
-   active.Loading = true;
-   status.Text = "正在加载视频…";
-   status.Visibility = Visibility.Visible;
-   try {
-    active.Media.Volume = targetVolume;
-    active.Media.Source = new Uri(Path.GetFullPath(path));
-    openingTimeout.Start();
-    active.Media.Play();
-   } catch (Exception e) {
-    HandleSlotFailure(active, e.Message);
-   }
-  }
-
-  private void PreloadStandby() {
-   if (closed || standby.Ready || standby.Loading) return;
-   string next = playlist.Next(false);
-   if (next == null) return;
-
-   if (string.Equals(next, standby.Path, StringComparison.OrdinalIgnoreCase) && standby.Media.Source != null) {
-    try {
-     standby.Media.Volume = 0;
-     standby.Media.Pause();
-     standby.Media.Position = TimeSpan.Zero;
-     standby.Ready = true;
-     return;
-    } catch { }
-   }
-
-   standby.Media.Stop();
-   standby.Media.Close();
-   standby.Path = next;
-   standby.Ready = false;
-   standby.Loading = true;
-   try {
-    standby.Media.Volume = 0;
-    standby.Media.Source = new Uri(Path.GetFullPath(next));
-    standby.Media.Play();
-   } catch (Exception e) {
-    HandleSlotFailure(standby, e.Message);
-   }
-  }
-
-  private void AdvanceActive() {
-   if (closed || swapping) return;
-   swapping = true;
-   try {
-    if (standby.Ready) {
-     var oldActive = active;
-     var newActive = standby;
-
-     newActive.Media.SpeedRatio = settings.Speed;
-     newActive.Media.Volume = targetVolume;
-     newActive.Media.Play();
-     Panel.SetZIndex(newActive.Host, 2);
-     Panel.SetZIndex(oldActive.Host, 1);
-     oldActive.Media.Volume = 0;
-
-     active = newActive;
-     standby = oldActive;
-     standby.Ready = false;
-     standby.Loading = false;
-     status.Visibility = Visibility.Collapsed;
-     loopMonitor.Start();
-
-     preloadDelay.Stop();
-     preloadDelay.Start();
-     return;
-    }
-
-    // Fallback if standby hasn't finished preloading yet
-    string next = standby.Loading && !string.IsNullOrEmpty(standby.Path) ? standby.Path : playlist.Next(false);
-    if (next == null) {
-     ShowNoVideo();
-     return;
-    }
-    if (string.Equals(next, active.Path, StringComparison.OrdinalIgnoreCase) && active.Media.Source != null) {
-     active.Media.Position = TimeSpan.Zero;
-     active.Media.SpeedRatio = settings.Speed;
-     active.Media.Volume = targetVolume;
-     active.Media.Play();
-     return;
-    }
-    LoadIntoActive(next);
-   } finally {
-    swapping = false;
-   }
-  }
-
-  private void HandleSlotFailure(MediaSlot slot, string reason) {
+  public void LoadAndPlay(int slotIndex, string path, int generation, bool activeNow) {
    if (closed) return;
-   string failedPath = slot.Path;
-   slot.Loading = false;
-   slot.Ready = false;
-   Log.Write("Playback failed: " + failedPath + "; " + reason);
-   playlist.MarkFailed(failedPath);
+   var slot = slots[slotIndex];
+   slot.Generation = generation;
+   slot.Path = path;
+   try {
+    slot.Media.SpeedRatio = settings.Speed;
+    slot.Media.Volume = activeNow ? targetVolume : 0;
+    slot.Media.Source = new Uri(Path.GetFullPath(path));
+    slot.Media.Play();
+   } catch (Exception e) {
+    Dispatcher.BeginInvoke(new Action(delegate {
+     if (!closed) controller.OnSlotFailed(slotIndex, generation, e.Message);
+    }));
+   }
+  }
+
+  public void RewindAndPlay(int slotIndex) {
+   if (closed) return;
+   var slot = slots[slotIndex];
+   slot.Media.Position = TimeSpan.Zero;
+   slot.Media.SpeedRatio = settings.Speed;
+   slot.Media.Volume = targetVolume;
+   slot.Media.Play();
+  }
+
+  public void PauseAtStart(int slotIndex) {
+   if (closed) return;
+   var slot = slots[slotIndex];
+   slot.Media.Volume = 0;
+   if (slot.Media.Source != null) {
+    slot.Media.Pause();
+    slot.Media.Position = TimeSpan.Zero;
+   }
+  }
+
+  public void PromoteVisual(int activeSlot, int standbySlot) {
+   if (closed) return;
+   var active = slots[activeSlot];
+   var standby = slots[standbySlot];
+   active.Media.SpeedRatio = settings.Speed;
+   active.Media.Volume = targetVolume;
+   active.Media.Play();
+   Panel.SetZIndex(active.Host, 2);
+   Panel.SetZIndex(standby.Host, 1);
+   standby.Media.Volume = 0;
+  }
+
+  public void MuteSlot(int slotIndex) {
+   if (!closed) slots[slotIndex].Media.Volume = 0;
+  }
+
+  public void ResetSlot(int slotIndex) {
+   var slot = slots[slotIndex];
    slot.Path = null;
+   slot.Media.Volume = 0;
    slot.Media.Stop();
    slot.Media.Close();
-
-   if (slot == active) {
-    Dispatcher.BeginInvoke(new Action(delegate {
-     if (closed) return;
-     if (standby.Ready) {
-      AdvanceActive();
-      return;
-     }
-     string next = playlist.Next(false);
-     if (next == null) ShowNoVideo(); else LoadIntoActive(next);
-    }));
-   } else {
-    Dispatcher.BeginInvoke(new Action(delegate {
-     if (!closed) PreloadStandby();
-    }));
-   }
+   slot.Media.Source = null;
   }
 
-  private void ShowNoVideo() {
+  public void StartOpeningTimeout(int generation) {
+   openingTimeoutGeneration = generation;
    openingTimeout.Stop();
-   loopMonitor.Stop();
+   openingTimeout.Start();
+  }
+
+  public void StopOpeningTimeout() {
+   openingTimeout.Stop();
+  }
+
+  public void SchedulePreload() {
    preloadDelay.Stop();
+   preloadDelay.Start();
+  }
+
+  public void StopPreloadTimer() {
+   preloadDelay.Stop();
+  }
+
+  public void ShowLoading() {
+   status.Text = "正在加载视频…";
+   status.Visibility = Visibility.Visible;
+  }
+
+  public void HideStatus() {
+   status.Visibility = Visibility.Collapsed;
+  }
+
+  public void ShowNoVideo() {
    status.Text = "FoxVideoSCR\n没有可播放的视频\n请在屏幕保护程序设置中添加视频，或检查 64 位解码组件。";
    status.Visibility = Visibility.Visible;
   }
 
   internal void Close() {
    closed = true;
-   openingTimeout.Stop();
-   loopMonitor.Stop();
-   preloadDelay.Stop();
-   slotA.Media.Close();
-   slotB.Media.Close();
+   controller.Close();
+   slots[0].Media.Close();
+   slots[1].Media.Close();
   }
  }
 
@@ -476,8 +619,18 @@ namespace FoxVideoSCR {
     Height = Math.Max(1, rect.B - rect.T)
    };
    source = new HwndSource(parameters);
-   video = new VideoSurface(settings, settings.Videos, settings.Fit, true);
-   source.RootVisual = video;
+
+   string mode, fit;
+   List<string> list;
+   settings.ResolvePrimaryPreview(DisplayEnumerator.GetAll(), out mode, out fit, out list);
+   if (mode == "Black" || mode == "Off") {
+    video = null;
+    source.RootVisual = new Border { Background = Brushes.Black };
+   } else {
+    video = new VideoSurface(settings.Copy(), list, fit, true);
+    source.RootVisual = video;
+   }
+
    timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
    timer.Tick += delegate { if (!Native.IsWindow(parent)) { Dispose(); app.Shutdown(); } };
    timer.Start();
@@ -487,7 +640,7 @@ namespace FoxVideoSCR {
    if (disposed) return;
    disposed = true;
    timer.Stop();
-   video.Close();
+   if (video != null) video.Close();
    source.Dispose();
   }
  }
