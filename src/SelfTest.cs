@@ -165,7 +165,13 @@ namespace FoxVideoSCR {
    }
   }
 
-  internal static void Run() {
+  internal static int Run() {
+   string resultPath = Path.Combine(Settings.DirectoryPath, "selftest-result.txt");
+   try {
+    Directory.CreateDirectory(Settings.DirectoryPath);
+    if (File.Exists(resultPath)) File.Delete(resultPath);
+   } catch { }
+
    string dir = Path.Combine(Path.GetTempPath(), "FoxVideoSCR-test-" + Guid.NewGuid().ToString("N"));
    Directory.CreateDirectory(dir);
    try {
@@ -263,10 +269,23 @@ namespace FoxVideoSCR {
     }
 
     Directory.CreateDirectory(Settings.DirectoryPath);
-    File.WriteAllText(Path.Combine(Settings.DirectoryPath, "selftest-result.txt"), "PASS: 8 checks");
+    File.WriteAllText(resultPath, "PASS: 8 checks");
+    return 0;
+   } catch (Exception ex) {
+    try {
+     Directory.CreateDirectory(Settings.DirectoryPath);
+     File.WriteAllText(resultPath, "FAIL: " + ex.Message);
+    } catch { }
+    Console.Error.WriteLine("FAIL: " + ex.Message);
+    Log.Write("SELFTEST FAILED: " + ex.ToString());
+    return 1;
    } finally {
-    foreach (var f in Directory.GetFiles(dir)) File.Delete(f);
-    Directory.Delete(dir);
+    try {
+     if (Directory.Exists(dir)) {
+      foreach (var f in Directory.GetFiles(dir)) File.Delete(f);
+      Directory.Delete(dir);
+     }
+    } catch { }
    }
   }
  }

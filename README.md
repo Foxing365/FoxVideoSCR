@@ -45,7 +45,7 @@ $start.UseShellExecute = $false
 
 ## 安装与卸载
 
-普通用户可在 [Releases](https://github.com/Foxing365/FoxVideoSCR/releases) 下载 `FoxVideoSCR-v0.2.2-windows-x64.zip`，**先解压整个 ZIP**，双击其中的 `Install.cmd`，并确认 Windows 管理员权限提示。不要在压缩包内直接运行，也不需要下载 Source code。
+普通用户可在 [Releases](https://github.com/Foxing365/FoxVideoSCR/releases) 下载 `FoxVideoSCR-v0.3.0-windows-x64.zip`，**先解压整个 ZIP**，双击其中的 `Install.cmd`，并确认 Windows 管理员权限提示。不要在压缩包内直接运行，也不需要下载 Source code。
 
 安装后，在自动打开的“屏幕保护程序设置”中确认选中 **FoxVideoSCR**，点击“设置”添加视频、调整播放偏好和显示器设置、保存，再点“预览”。等待时间和恢复时登录选项由 Windows 管理。
 

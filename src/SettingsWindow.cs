@@ -119,7 +119,7 @@ namespace FoxVideoSCR {
     Padding = new Thickness(7, 2, 7, 2),
     Margin = new Thickness(10, 0, 0, 0),
     VerticalAlignment = VerticalAlignment.Center,
-    Child = new TextBlock { Text = "v0.2.2 · 64位", Foreground = AccentSoftText, FontSize = 11, FontWeight = FontWeights.SemiBold }
+    Child = new TextBlock { Text = "v0.3.0 · 64位", Foreground = AccentSoftText, FontSize = 11, FontWeight = FontWeights.SemiBold }
    };
    titleLine.Children.Add(versionPill);
    titleStack.Children.Add(titleLine);
@@ -600,16 +600,30 @@ namespace FoxVideoSCR {
    var dropped = e.Data.GetData(DataFormats.FileDrop) as string[];
    if (dropped == null) return;
    int added = 0;
+   var skipped = new List<string>();
    foreach (var item in dropped) {
-    if (Directory.Exists(item)) {
-     foreach (string p in Directory.GetFiles(item).OrderBy(x => x)) {
-      if (Settings.VideoExtensions.Contains(Path.GetExtension(p).ToLowerInvariant()) && AddPath(p)) added++;
+    try {
+     if (Directory.Exists(item)) {
+      foreach (string p in Directory.GetFiles(item).OrderBy(x => x)) {
+       if (Settings.VideoExtensions.Contains(Path.GetExtension(p).ToLowerInvariant()) && AddPath(p)) added++;
+      }
+     } else if (File.Exists(item)) {
+      if (AddPath(item)) added++;
      }
-    } else if (File.Exists(item)) {
-     if (AddPath(item)) added++;
+    } catch (Exception ex) {
+     Log.Write("Drop skipped: " + item + "; " + ex.Message);
+     string label = Path.GetFileName((item ?? "").TrimEnd('\\', '/'));
+     skipped.Add(string.IsNullOrEmpty(label) ? item : label);
     }
    }
-   feedback.Text = added > 0 ? "已拖入添加 " + added + " 个视频（记得点击保存设置）" : "没有新增视频（可能已存在）";
+   if (skipped.Count > 0) {
+    string skippedText = "已跳过无法读取的目录：" + string.Join("、", skipped);
+    feedback.Text = added > 0
+     ? "已拖入添加 " + added + " 个视频（记得点击保存设置）；" + skippedText
+     : "未新增视频；" + skippedText;
+   } else {
+    feedback.Text = added > 0 ? "已拖入添加 " + added + " 个视频（记得点击保存设置）" : "没有新增视频（可能已存在）";
+   }
   }
 
   private void AddFiles() {

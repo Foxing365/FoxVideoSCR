@@ -12,17 +12,28 @@ if ($SystemCopyOnly) {
     }
     exit 0
 }
+function Test-IsFoxScreensaver([string]$Path, [string]$FoxPath) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    if ($Path -ieq $FoxPath) { return $true }
+    $leaf = Split-Path -Path $Path -Leaf
+    if ($leaf -ieq 'FoxVideoSCR.scr' -or $leaf -ieq 'FOXVID~1.SCR') { return $true }
+    if (Test-Path -LiteralPath $Path) {
+        return ((Get-Item -LiteralPath $Path).FullName -ieq $FoxPath)
+    }
+    return $false
+}
 $installer = '"' + $PSCommandPath + '"'
 $elevated = Start-Process -FilePath (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $installer, '-SystemCopyOnly') -Verb RunAs -Wait -PassThru -WindowStyle Hidden
 if ($elevated.ExitCode -ne 0) { throw 'System installation failed; current screen saver was not changed.' }
+$foxPath = Join-Path $env:WINDIR 'System32\FoxVideoSCR.scr'
 $data = Join-Path $env:LOCALAPPDATA 'FoxVideoSCR'
 New-Item -ItemType Directory -Path $data -Force | Out-Null
 $backup = Join-Path $data 'previous-screensaver.json'
-if (!(Test-Path -LiteralPath $backup)) {
-    $old = Get-ItemProperty 'HKCU:\Control Panel\Desktop'
+$old = Get-ItemProperty 'HKCU:\Control Panel\Desktop'
+if (!(Test-IsFoxScreensaver $old.'SCRNSAVE.EXE' $foxPath)) {
     @{ Path = $old.'SCRNSAVE.EXE'; Active = $old.ScreenSaveActive } | ConvertTo-Json | Set-Content -LiteralPath $backup -Encoding UTF8
 }
-Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name 'SCRNSAVE.EXE' -Value (Join-Path $env:WINDIR 'System32\FoxVideoSCR.scr')
+Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name 'SCRNSAVE.EXE' -Value $foxPath
 Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name 'ScreenSaveActive' -Value '1'
 Start-Process -FilePath (Join-Path $env:WINDIR 'System32\control.exe') -ArgumentList 'desk.cpl,,@screensaver'
 Write-Output 'FoxVideoSCR installed. Choose Settings to configure your videos. The wait time and sign-in setting are preserved.'
