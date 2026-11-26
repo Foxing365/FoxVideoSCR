@@ -173,11 +173,18 @@ namespace FoxVideoSCR {
    order = mode;
   }
 
+  internal void MarkFailed(string path) {
+   if (string.IsNullOrEmpty(path)) return;
+   for (int i = 0; i < files.Count; i++) {
+    if (string.Equals(files[i], path, StringComparison.OrdinalIgnoreCase)) failed.Add(i);
+   }
+  }
+
   internal string Next(bool failure) {
    if (failure && index >= 0) failed.Add(index);
    var candidates = Enumerable.Range(0, files.Count).Where(i => !failed.Contains(i)).ToList();
    if (candidates.Count == 0) return null;
-   if (order == "Single" && index >= 0 && !failure) return files[index];
+   if (order == "Single" && index >= 0 && !failure && !failed.Contains(index)) return files[index];
    if (order == "Shuffle") {
     var pool = candidates.Where(i => i != index).ToList();
     if (pool.Count == 0) pool = candidates;

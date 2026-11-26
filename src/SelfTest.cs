@@ -21,6 +21,13 @@ namespace FoxVideoSCR {
     var failures = new Playlist(new[] { a, b }, "Sequential");
     Assert(failures.Next(false) == a && failures.Next(true) == b && failures.Next(true) == null, "failed videos must terminate instead of retrying forever");
 
+    var markFailed = new Playlist(new[] { a, b }, "Single");
+    Assert(markFailed.Next(false) == a, "markFailed initial item");
+    markFailed.MarkFailed(a);
+    Assert(markFailed.Next(false) == b, "markFailed fallback to next playable item");
+    markFailed.MarkFailed(b);
+    Assert(markFailed.Next(false) == null, "markFailed all failed returns null");
+
     var shuffle = new Playlist(new[] { a, b }, "Shuffle");
     string last = shuffle.Next(false);
     for (int i = 0; i < 30; i++) {
